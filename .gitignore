@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+*.db
+*.lock
+build/
+tokens/
+google-client.json
+agent-tokens.json
+/config.json
+.DS_Store

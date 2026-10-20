@@ -1,0 +1,5 @@
+#!/bin/sh
+# Runs calsync from this checkout with the system python3 (standard library only).
+HERE="$(cd "$(dirname "$0")/.." && pwd)"
+PYTHON="${CALSYNC_PYTHON:-/usr/bin/python3}"
+PYTHONPATH="$HERE${PYTHONPATH:+:$PYTHONPATH}" exec "$PYTHON" -m calsync "$@"

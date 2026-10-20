@@ -1,0 +1,40 @@
+{
+  "details_calendar": "personal",
+  "window": {"days_back": 1, "days_ahead": 60},
+  "include_all_day": false,
+  "agent_stale_minutes": 30,
+  "kill_switch_file": "~/.config/calsync/DISABLED",
+  "state_db": "~/.config/calsync/state.db",
+  "tokens_dir": "~/.config/calsync/tokens",
+  "agent_tokens_file": "~/.config/calsync/agent-tokens.json",
+  "server": {"host": "127.0.0.1", "port": 8787},
+  "google": {
+    "client_file": "~/.config/calsync/google-client.json",
+    "scopes": ["https://www.googleapis.com/auth/calendar.events.owned"]
+  },
+  "microsoft": {
+    "scopes": [
+      "https://graph.microsoft.com/Calendars.ReadWrite",
+      "https://graph.microsoft.com/User.ReadBasic.All",
+      "offline_access",
+      "openid"
+    ]
+  },
+  "calendars": {
+    "personal": {"type": "google", "account": "jbcluff@gmail.com", "calendar_id": "primary", "tag": "Personal"},
+    "gigabug": {"type": "google", "account": "jared.cluff@gigabugpro.com", "calendar_id": "primary", "tag": "Gigabug"},
+    "labalicious": {"type": "google", "account": "jared.cluff@labalicious.com", "calendar_id": "primary", "tag": "Labalicious"},
+    "peregryn": {
+      "type": "microsoft",
+      "account": "Jared.Cluff@peregryn.com",
+      "tenant": "9534073c-9fb8-4d99-b677-c84073bd694e",
+      "client_id": "f455286c-1fd3-403c-8bc9-cbffea387297",
+      "tag": "Peregryn"
+    },
+    "phdata": {"type": "agent", "agent": "worklaptop", "tag": "phData"},
+    "kiewit": {"type": "agent", "agent": "worklaptop", "tag": "Kiewit"}
+  },
+  "agents": {
+    "worklaptop": {"calendars": ["phdata", "kiewit"]}
+  }
+}
