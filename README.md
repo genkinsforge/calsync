@@ -185,7 +185,7 @@ launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.genkinsforge.calsync
 launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.genkinsforge.calsync.sync.plist
 ```
 
-These are ordinary LaunchAgents. `LimitLoadToSessionType Background` is not valid for a LaunchAgent, so the templates do not set it. After a headless reboot with nobody logged in, LaunchAgents do not start. Bootstrap them over SSH with `launchctl bootstrap gui/$(id -u) <plist>`, or `launchctl bootstrap user/$(id -u) <plist>` when there is no GUI session.
+The plists set `LimitLoadToSessionType` to `Aqua` and `Background`. The studio often runs with nobody logged in at the console, and then the `gui/<uid>` domain does not exist; load the jobs with `launchctl bootstrap user/$(id -u) <plist>` instead, which only works because of the `Background` entry. Use `gui/$(id -u)` when someone is logged in.
 
 ### 8. Agent on the work Mac
 

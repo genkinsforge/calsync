@@ -18,6 +18,13 @@
     <key>PYTHONPATH</key>
     <string>__CALSYNC_DIR__</string>
   </dict>
+  <!-- Background lets the job load with `launchctl bootstrap user/<uid>` when the studio
+       has rebooted with nobody logged in; Aqua covers a normal logged-in session. -->
+  <key>LimitLoadToSessionType</key>
+  <array>
+    <string>Aqua</string>
+    <string>Background</string>
+  </array>
   <key>RunAtLoad</key>
   <true/>
   <key>KeepAlive</key>
