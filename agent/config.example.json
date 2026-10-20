@@ -1,0 +1,10 @@
+{
+  "hub_url": "https://calsync.example.com",
+  "token": "PASTE THE TOKEN FROM `calsync agent-token worklaptop`",
+  "days_back": 1,
+  "days_ahead": 60,
+  "calendars": {
+    "phdata": {"title": "Calendar", "source": "jared.cluff@phdata.io"},
+    "kiewit": {"title": "Calendar", "source": "jared.cluff@kiewit.com"}
+  }
+}
