@@ -43,6 +43,7 @@ def request(method, url, *, headers=None, json_body=None, form=None, retries=5, 
                 return json.loads(raw) if raw.strip() else {}
         except urllib.error.HTTPError as e:
             body = e.read().decode("utf-8", "replace") if e.fp else ""
+            e.close()
             if e.code in RETRY_STATUSES and attempt < retries:
                 sleep(_delay(attempt, e.headers.get("Retry-After") if e.headers else None))
                 attempt += 1

@@ -59,6 +59,9 @@ class Store:
         if self.path != ":memory:":
             os.chmod(self.path, 0o600)
 
+    def close(self):
+        self.db.close()
+
     # ---------------------------------------------------------------- meta
     def install_id(self, override: str | None = None) -> str:
         if override:
