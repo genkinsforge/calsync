@@ -49,6 +49,7 @@ class Config:
             else:
                 merged[k] = v
         self.data = merged
+        self.file = None
         self.validate()
 
     @classmethod
@@ -56,7 +57,9 @@ class Config:
         path = Path(_expand(str(path or CONFIG_DIR / "config.json")))
         if not path.exists():
             raise ConfigError(f"config not found: {path} (copy config.example.json there)")
-        return cls(json.loads(path.read_text()))
+        cfg = cls(json.loads(path.read_text()))
+        cfg.file = path
+        return cfg
 
     def validate(self):
         cals = self.calendars

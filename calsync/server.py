@@ -7,6 +7,10 @@
 from __future__ import annotations
 
 import hashlib
+import io
+import subprocess
+import sys
+import tarfile
 import hmac
 import json
 import os
@@ -24,6 +28,54 @@ from .model import Window, fmt_dt
 from .state import Store
 
 MAX_BODY = 8 * 1024 * 1024
+AGENT_DIR = Path(__file__).resolve().parent.parent / "agent"
+REPO_DIR = AGENT_DIR.parent
+BUNDLE_FILES = ("calsync-agent.js", "calsync-agent.sh", "install.sh", "uninstall.sh",
+                "config.example.json", "com.genkinsforge.calsync-agent.plist.template")
+
+
+def agent_bundle() -> bytes:
+    """The agent directory as a gzipped tar, built fresh so it always matches the repo."""
+    buf = io.BytesIO()
+    with tarfile.open(fileobj=buf, mode="w:gz") as tar:
+        for name in BUNDLE_FILES:
+            tar.add(AGENT_DIR / name, arcname=f"calsync-agent/{name}")
+    return buf.getvalue()
+
+
+def install_script(hub_url: str, token: str) -> str:
+    """A shell script that downloads the bundle with the same key, installs it and writes the hub
+    address and key into the agent's config. Served only to a caller who already holds the key."""
+    q = lambda v: "'" + v.replace("'", "'\\''") + "'"
+    return f"""#!/bin/sh
+# calsync agent installer, served by {hub_url}. Uses only what ships with macOS.
+set -eu
+HUB={q(hub_url)}
+TOKEN={q(token)}
+TMP="$(mktemp -d)"
+trap 'rm -rf "$TMP"' EXIT
+/usr/bin/curl -fsS -H "Authorization: Bearer $TOKEN" "$HUB/agent/bundle.tar.gz" -o "$TMP/b.tgz"
+/usr/bin/tar -xzf "$TMP/b.tgz" -C "$TMP"
+CONF="$HOME/.config/calsync-agent/config.json"
+FRESH=0; [ -e "$CONF" ] || FRESH=1
+sh "$TMP/calsync-agent/install.sh"
+if [ "$FRESH" = 1 ] || grep -q 'calsync.example.com' "$CONF"; then
+  /usr/bin/osascript -l JavaScript - "$CONF" "$HUB" "$TOKEN" <<'JS'
+function run(argv) {{
+  ObjC.import('Foundation');
+  var path = argv[0];
+  var c = JSON.parse($.NSString.stringWithContentsOfFileEncodingError(path, $.NSUTF8StringEncoding, null).js);
+  c.hub_url = argv[1]; c.token = argv[2];
+  $(JSON.stringify(c, null, 2)).writeToFileAtomicallyEncodingError(path, true, $.NSUTF8StringEncoding, null);
+}}
+JS
+  chmod 600 "$CONF"
+  echo "Set hub_url and token in $CONF."
+fi
+echo
+echo "Now map your calendars. This also triggers the macOS Calendar permission prompt:"
+echo "  \"$HOME/Library/Application Support/calsync-agent/calsync-agent.sh\" --list-calendars"
+"""
 
 
 def _hash(token: str) -> str:
@@ -89,10 +141,56 @@ def make_server(cfg: Config, store: Store, host=None, port=None, tokens_file=Non
         def log_message(self, fmt, *args):
             pass
 
+        def _send_raw(self, code, raw: bytes, ctype: str):
+            self.send_response(code)
+            self.send_header("Content-Type", ctype)
+            self.send_header("Content-Length", str(len(raw)))
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            self.wfile.write(raw)
+
+        def _admin(self):
+            agent = self._agent()
+            if agent and not cfg.data["agents"].get(agent, {}).get("admin"):
+                self._send(403, {"error": "this key is not an admin key"})
+                return None
+            return agent
+
+        def _hub_url(self):
+            # Behind the tunnel the public host arrives in Host; X-Forwarded-Proto says https.
+            proto = self.headers.get("X-Forwarded-Proto") or ("https" if self.headers.get("Cf-Ray") else "http")
+            return f"{proto}://{self.headers.get('Host', '127.0.0.1')}"
+
         def do_GET(self):
             u = urllib.parse.urlparse(self.path)
             if u.path == "/healthz":
                 return self._send(200, {"ok": True})
+            if u.path == "/agent/install":
+                if not self._agent():
+                    return
+                token = self.headers["Authorization"][len("Bearer "):].strip()
+                return self._send_raw(200, install_script(self._hub_url(), token).encode(), "text/x-shellscript")
+            if u.path == "/agent/bundle.tar.gz":
+                if not self._agent():
+                    return
+                return self._send_raw(200, agent_bundle(), "application/gzip")
+            if u.path == "/status":
+                if not self._admin():
+                    return
+                with lock:
+                    statuses, counts = store.statuses(), store.mapping_counts()
+                    cals = {}
+                    for name, c in cfg.calendars.items():
+                        entry = {"type": c["type"], **statuses.get(name, {})}
+                        if c["type"] == "agent":
+                            push = store.get_push(name)
+                            plan = store.get_plan(name)
+                            entry["last_push_at"] = push["pushed_at"] if push else None
+                            entry["blocks"] = len(plan["blocks"]) if plan else 0
+                        else:
+                            entry["mirrors"] = counts.get(name, 0)
+                        cals[name] = entry
+                return self._send(200, {"install_id": install_id, "kill_switch": cfg.kill_switch.exists(), "calendars": cals})
             if u.path != "/agent/blocks":
                 return self._send(404, {"error": "not found"})
             agent = self._agent()
@@ -119,6 +217,17 @@ def make_server(cfg: Config, store: Store, host=None, port=None, tokens_file=Non
 
         def do_POST(self):
             u = urllib.parse.urlparse(self.path)
+            if u.path == "/sync":
+                if not self._admin():
+                    return
+                args = [sys.executable, "-m", "calsync"] + (["--config", str(cfg.file)] if cfg.file else []) + ["sync"]
+                if urllib.parse.parse_qs(u.query).get("dry_run"):
+                    args.append("--dry-run")
+                # Detached: the request returns at once and the sync runs to completion on its own.
+                subprocess.Popen(args, cwd=str(REPO_DIR), stdin=subprocess.DEVNULL, start_new_session=True,
+                                 stdout=open(Path(cfg.path("state_db")).with_name("sync-on-demand.log"), "ab"),
+                                 stderr=subprocess.STDOUT)
+                return self._send(202, {"ok": True, "started": " ".join(args[args.index("sync"):])})
             if u.path != "/agent/events":
                 return self._send(404, {"error": "not found"})
             agent = self._agent()

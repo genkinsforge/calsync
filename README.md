@@ -92,7 +92,13 @@ The agent, every 5 minutes:
 
 - `POST /agent/events` with body `{"calendars": {"phdata": {"events": [...]}, "kiewit": {"error": "calendar not found"}}}`. An `error` entry keeps the last good set and freezes that calendar.
 - `GET /agent/blocks?calendar=phdata` returns `{"calendar", "install_id", "generated_at", "window": {"start", "end"}, "blocks": [{"mirror_id", "title", "start", "end", "all_day", "hash"}], "frozen_sources": [...]}`. It returns 409 before the first sync and 503 while the kill switch is on.
+- `GET /agent/install` returns a shell script that downloads the agent from the hub with the caller's key, installs it, and writes the hub address and key into the agent's config. Run it on the work Mac with `curl -fsSL -H "Authorization: Bearer KEY" https://calsync.jaredcluff.com/agent/install | sh`.
+- `GET /agent/bundle.tar.gz` returns the `agent/` files, built from the repo on each request.
+- `GET /status` (admin key) returns each calendar's last read and write result, mirror and block counts, and the agent's last push.
+- `POST /sync` (admin key) starts a sync on the hub and returns at once; `POST /sync?dry_run=1` plans without writing. Output goes to `sync-on-demand.log` beside the state database.
 - `GET /healthz` needs no auth.
+
+An admin key is an entry in `agents` with `"admin": true` and no calendars, for example `"jared": {"admin": true, "calendars": []}`. Create its key with `calsync agent-token jared`.
 
 Each agent has its own long random bearer token. The hub stores only its SHA-256 in `~/.config/calsync/agent-tokens.json` (mode 0600) and compares with `hmac.compare_digest`. An agent can push and read only the calendars assigned to it in `agents` in the config.
 
@@ -183,11 +189,13 @@ These are ordinary LaunchAgents. `LimitLoadToSessionType Background` is not vali
 
 ### 8. Agent on the work Mac
 
-The agent needs nothing installed. Copy the `agent/` folder to the work Mac (AirDrop, a zip, or `git clone`), then:
+The agent needs nothing installed, and nothing needs copying: the hub serves it. On the work Mac, in Terminal:
 
 ```sh
-sh agent/install.sh
+curl -fsSL -H "Authorization: Bearer WORKLAPTOP-KEY" https://calsync.jaredcluff.com/agent/install | sh
 ```
+
+That downloads the agent from the hub, runs `install.sh`, and puts the hub address and key in the config. To install by hand instead, copy the `agent/` folder over and run `sh agent/install.sh`.
 
 `install.sh` copies the agent to `~/Library/Application Support/calsync-agent/`, writes `~/.config/calsync-agent/config.json` (mode 0600) from the example if it is missing, runs the self-test, writes `~/Library/LaunchAgents/com.genkinsforge.calsync-agent.plist` and loads it with `launchctl bootstrap gui/$(id -u)`. `uninstall.sh` reverses it and keeps the config.
 
