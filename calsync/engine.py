@@ -246,7 +246,8 @@ class Engine:
             self.say(f"{prefix}[{target}] agent will delete Busy {old_blocks[m]['start']} -> {old_blocks[m]['end']}")
         counts = {"blocks": len(blocks), "create": len(added), "update": len(changed), "delete": len(removed)}
         if not dry_run:
-            self.store.save_plan(target, sorted(blocks.values(), key=lambda b: (b["start"], b["mirror_id"])))
+            self.store.save_plan(target, sorted(blocks.values(), key=lambda b: (b["start"], b["mirror_id"])),
+                                 frozen=frozen)
             self.store.set_status(target, write=(True, f"plan published: {_fmt_counts(counts)}"))
         self.say(f"{prefix}[{target}] {_fmt_counts(counts)} (applied by the work-Mac agent)")
         return counts

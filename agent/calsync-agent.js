@@ -164,7 +164,9 @@ function blockSpan(block) {
 // existing: [{ref, marker, hash, start, end, allDay}] for every event in the calendar window.
 // Returns {create: [block], update: [{block, ref}], remove: [ref], keep: n}. Unmarked events and
 // events marked by another installation are never in update/remove.
-function planApply(blocks, existing, installId, windowStartMs) {
+// Blocks whose source calendar is in `frozen` (the hub could not read it) are never removed.
+function planApply(blocks, existing, installId, windowStartMs, frozen) {
+  frozen = frozen || [];
   var ours = {}, dupes = [];
   existing.forEach(function (e) {
     var p = parseMirror(e.marker);
@@ -184,7 +186,7 @@ function planApply(blocks, existing, installId, windowStartMs) {
   });
   Object.keys(ours).forEach(function (mid) {
     var e = ours[mid];
-    if (!want[mid] && e.end > windowStartMs) plan.remove.push(e.ref);
+    if (!want[mid] && e.end > windowStartMs && frozen.indexOf(parseMirror(mid).source) < 0) plan.remove.push(e.ref);
   });
   return plan;
 }
@@ -361,7 +363,7 @@ function applyBlocks(cfg, blocksPath, name, dryRun) {
     return {ref: r, marker: markerOf(r.url, r.notes), hash: hashOf(r.notes), start: r.start, end: r.end,
             allDay: r.allDay};
   });
-  var plan = planApply(resp.blocks, existing, resp.install_id, winStart);
+  var plan = planApply(resp.blocks, existing, resp.install_id, winStart, resp.frozen_sources || []);
   var tag = (dryRun ? 'DRY-RUN ' : '') + '[' + name + '] ';
   plan.create.forEach(function (b) { log(tag + 'create Busy ' + b.start + ' -> ' + b.end); });
   plan.update.forEach(function (u) { log(tag + 'update Busy ' + u.block.start + ' -> ' + u.block.end); });
@@ -419,6 +421,8 @@ function selfTest() {
   eq(plan.update.map(function (u) { return u.ref; }), ['b2old'], 'hash change updates');
   eq(plan.remove, ['gone'], 'only our in-window orphan is removed');
   eq(plan.keep, 1, 'unchanged kept');
+  eq(planApply([b1, b2], existing, INST, t('2026-10-19T12:00:00Z'), ['personal']).remove, [],
+     'blocks of a source the hub could not read are kept');
   var plan2 = planApply([b1], [], INST, 0);
   eq(plan2.create.length, 1, 'missing block is created');
   var moved = existing.slice(1, 2).map(function (e) { return {ref: 'b1', marker: e.marker, hash: 'h1', start: e.start + 3600000, end: e.end + 3600000, allDay: false}; });

@@ -222,6 +222,7 @@ class AgentStalenessTests(EngineTestCase):
         self.assertIn("phdata", res["frozen"])
         self.assertEqual(len(self.g.mirrors()), 1)
         self.assertEqual(len(self.r.blocks("kiewit")), 1, "kiewit's plan keeps phdata's blocks")
+        self.assertIn("phdata", self.r.store.get_plan("kiewit")["frozen_sources"])
 
 
 class RecurrenceAndAllDayTests(EngineTestCase):

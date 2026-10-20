@@ -113,6 +113,8 @@ def make_server(cfg: Config, store: Store, host=None, port=None, tokens_file=Non
                 "calendar": cal, "install_id": install_id, "generated_at": plan["generated_at"],
                 "window": {"start": fmt_dt(win.start), "end": fmt_dt(win.end)},
                 "blocks": plan["blocks"],
+                # Sources the hub could not read this pass; the agent must not delete their blocks.
+                "frozen_sources": plan["frozen_sources"],
             })
 
         def do_POST(self):

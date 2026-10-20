@@ -110,10 +110,11 @@ class Store:
         d["events"] = json.loads(d.pop("events_json"))
         return d
 
-    def save_plan(self, calendar, blocks, at=None):
+    def save_plan(self, calendar, blocks, frozen=(), at=None):
         self.db.execute(
             "INSERT OR REPLACE INTO agent_plan VALUES (?,?,?)",
-            (calendar, at if at is not None else time.time(), json.dumps(blocks)),
+            (calendar, at if at is not None else time.time(),
+             json.dumps({"blocks": blocks, "frozen_sources": sorted(frozen)})),
         )
         self.db.commit()
 
@@ -121,7 +122,9 @@ class Store:
         r = self.db.execute("SELECT * FROM agent_plan WHERE calendar=?", (calendar,)).fetchone()
         if not r:
             return None
-        return {"generated_at": r["generated_at"], "blocks": json.loads(r["blocks_json"])}
+        data = json.loads(r["blocks_json"])
+        return {"generated_at": r["generated_at"], "blocks": data["blocks"],
+                "frozen_sources": data.get("frozen_sources", [])}
 
     # ---------------------------------------------------------------- status
     def set_status(self, calendar, *, read=None, write=None, stale=None):

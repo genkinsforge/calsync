@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.genkinsforge.calsync.sync</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>__PYTHON3__</string>
+    <string>-m</string>
+    <string>calsync</string>
+    <string>sync</string>
+  </array>
+  <key>WorkingDirectory</key>
+  <string>__CALSYNC_DIR__</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PYTHONPATH</key>
+    <string>__CALSYNC_DIR__</string>
+  </dict>
+  <key>StartInterval</key>
+  <integer>300</integer>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>ProcessType</key>
+  <string>Background</string>
+  <key>StandardOutPath</key>
+  <string>__HOME__/Library/Logs/calsync/sync.log</string>
+  <key>StandardErrorPath</key>
+  <string>__HOME__/Library/Logs/calsync/sync.log</string>
+</dict>
+</plist>

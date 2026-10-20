@@ -60,6 +60,7 @@ class ServerTests(unittest.TestCase):
         self.assertEqual([b["title"] for b in out["blocks"]], ["Busy"])
         self.assertTrue(out["blocks"][0]["mirror_id"].startswith("aaaaaaaaaaaa.kiewit."))
         self.assertIn("start", out["window"])
+        self.assertEqual(out["frozen_sources"], [])
         self.assertEqual(self.r.cals["personal"].mirrors()[0].title, "[phData] Client sync")
 
     def test_wrong_calendar_forbidden_and_bad_body_rejected(self):
