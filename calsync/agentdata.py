@@ -34,6 +34,18 @@ def validate_events(events) -> list:
     return clean
 
 
+def marker_of(e: dict):
+    """calsync's marker on a pushed event: the agent's field, else a calsync:// URL."""
+    url = e.get("url") or ""
+    return e.get("marker") or (url[len("calsync://"):] if url.startswith("calsync://") else None)
+
+
+def split_marked(events: list):
+    """(own, n_marked): calsync's own blocks are never sources, so a push keeps only the rest."""
+    own = [e for e in events if not marker_of(e)]
+    return own, len(events) - len(own)
+
+
 def _times(e: dict):
     if e["all_day"]:
         return parse_date(e["start"]), parse_date(e["end"])
@@ -55,6 +67,6 @@ def events_from_push(events: list) -> list:
             cancelled=e.get("status") == "canceled",
             free=e.get("availability") == "free",
             declined=e.get("self_status") == "declined",
-            marker=e.get("marker") or (url[len("calsync://"):] if url.startswith("calsync://") else None),
+            marker=marker_of(e),
         ))
     return out

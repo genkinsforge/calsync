@@ -74,6 +74,17 @@ class ServerTests(unittest.TestCase):
         push = self.r.store.get_push("phdata")
         self.assertEqual((len(push["events"]), push["error"]), (1, "calendar not found"))
 
+    def test_push_replaces_set_and_skips_marked(self):
+        self.call("POST", "/agent/events", {"calendars": {"phdata": {"events": [
+            agent_event("p1", at(1), at(2)), agent_event("p2", at(3), at(4))]}}})
+        code, out = self.call("POST", "/agent/events", {"calendars": {"phdata": {"events": [
+            agent_event("p3", at(5), at(6)),
+            agent_event("b1", at(1), at(2), title="Busy", marker="aaaaaaaaaaaa.kiewit.0123456789abcdef01234567"),
+            agent_event("b2", at(3), at(4), title="Busy", url="calsync://aaaaaaaaaaaa.personal.0123456789abcdef01234567"),
+        ]}}})
+        self.assertEqual((code, out["stored"], out["skipped_marked"]), (200, {"phdata": 1}, {"phdata": 2}))
+        self.assertEqual([e["id"] for e in self.r.store.get_push("phdata")["events"]], ["p3"])
+
     def test_kill_switch_blocks_agent(self):
         self.r.store.save_plan("phdata", [])
         self.r.cfg.kill_switch.write_text("")

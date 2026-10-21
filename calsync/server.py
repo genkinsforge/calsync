@@ -23,7 +23,7 @@ from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-from .agentdata import PushError, validate_events
+from .agentdata import PushError, split_marked, validate_events
 from .config import Config
 from .model import Window, fmt_dt
 from .state import Store
@@ -305,7 +305,7 @@ def make_server(cfg: Config, store: Store, host=None, port=None, tokens_file=Non
                         parsed[cal] = (validate_events(data.get("events")), None)
             except (ValueError, KeyError, TypeError, AttributeError) as e:
                 return self._send(400, {"error": f"bad request: {e}"})
-            stored = {}
+            stored, skipped = {}, {}
             with lock:
                 for cal, (events, err) in parsed.items():
                     if err:
@@ -314,8 +314,10 @@ def make_server(cfg: Config, store: Store, host=None, port=None, tokens_file=Non
                         store.save_push(cal, agent, prev["events"] if prev else [], error=err)
                         stored[cal] = f"error recorded: {err}"
                     else:
-                        store.save_push(cal, agent, events)
-                        stored[cal] = len(events)
-            self._send(200, {"ok": True, "stored": stored})
+                        # Each push replaces the calendar's whole stored set; calsync's own blocks are dropped.
+                        own, skipped[cal] = split_marked(events)
+                        store.save_push(cal, agent, own)
+                        stored[cal] = len(own)
+            self._send(200, {"ok": True, "stored": stored, "skipped_marked": skipped})
 
     return ThreadingHTTPServer((host or cfg.data["server"]["host"], int(port if port is not None else cfg.data["server"]["port"])), Handler)
