@@ -69,6 +69,12 @@ class AdminAndInstallTests(unittest.TestCase):
         for name in ("calsync-agent/calsync-agent.js", "calsync-agent/install.sh", "calsync-agent/calsync-agent.sh"):
             self.assertIn(name, names)
 
+    def test_home_and_privacy_pages_are_public(self):
+        for path in ("/", "/privacy"):
+            code, ctype, body = self.get(path)
+            self.assertEqual((code, ctype), (200, "text/html; charset=utf-8"))
+            self.assertIn(b"Jared Cluff", body)
+
     def test_status_is_admin_only(self):
         self.assertEqual(self.get("/status")[0], 401)
         self.assertEqual(self.get("/status", self.agent)[0], 403)

@@ -99,6 +99,36 @@ echo "  \\"$HOME/Library/Application Support/calsync-agent/calsync-agent.sh\\" -
 """
 
 
+PAGES = {
+    "/": ("calsync", "<p>calsync keeps one person's calendars in step: each calendar gets a Busy block "
+          "for time taken on the others, and only the owner's personal calendar receives event details. "
+          "It is a private tool run by Jared Cluff for his own accounts and has no other users.</p>"
+          '<p><a href="/privacy">Privacy policy</a></p>'),
+    "/privacy": ("calsync privacy policy",
+                 "<p>calsync is used only by its owner, Jared Cluff, on his own calendar accounts.</p>"
+                 "<p><b>What it reads.</b> Events on the calendars the owner signs in: times, titles, "
+                 "locations, descriptions and meeting links, and calsync's own Busy blocks.</p>"
+                 "<p><b>What it writes.</b> Busy blocks, marked as calsync's, on the owner's calendars, and "
+                 "detailed copies on the owner's personal calendar only. It never changes or deletes an "
+                 "event it did not create.</p>"
+                 "<p><b>Where data lives.</b> Sign-in tokens and sync state are stored on a computer the "
+                 "owner controls. Nothing is sold, shared, or sent to anyone else, and Google user data "
+                 "is not used for advertising or to train models.</p>"
+                 "<p><b>Removing access.</b> Revoke calsync at myaccount.google.com/permissions; its stored "
+                 "token then stops working. Contact: jbcluff@gmail.com.</p>"),
+}
+
+
+def page(path: str) -> bytes | None:
+    if path not in PAGES:
+        return None
+    title, body = PAGES[path]
+    return (f'<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" '
+            f'content="width=device-width,initial-scale=1"><title>{title}</title><style>body{{font:16px/1.5 '
+            f'system-ui,sans-serif;max-width:40rem;margin:2rem auto;padding:0 1rem}}</style></head><body>'
+            f'<h1>{title}</h1>{body}</body></html>').encode()
+
+
 def _hash(token: str) -> str:
     return hashlib.sha256(token.encode()).hexdigest()
 
@@ -186,6 +216,8 @@ def make_server(cfg: Config, store: Store, host=None, port=None, tokens_file=Non
             u = urllib.parse.urlparse(self.path)
             if u.path == "/healthz":
                 return self._send(200, {"ok": True})
+            if page(u.path) is not None:   # home page and privacy policy for Google's consent screen
+                return self._send_raw(200, page(u.path), "text/html; charset=utf-8")
             if u.path == "/agent/install":
                 return self._send_raw(200, install_script(self._hub_url()).encode(), "text/x-shellscript")
             if u.path == "/agent/bundle.tar.gz":
