@@ -29,7 +29,7 @@ class Desired:
 
 @dataclass
 class Action:
-    op: str                 # create | update | delete | forget
+    op: str                 # create | update | delete | dedupe | forget
     mirror_id: str
     target_event_id: str = ""
     desired: Desired | None = None
@@ -43,12 +43,21 @@ def plan_target(desired: dict, mappings: dict, listing: list, install_id: str,
     Only events in `listing` that carry a marker belonging to this installation
     can be updated or deleted. Unmarked events are never touched.
     """
-    ours = {}
+    ours, dupes = {}, []
     for ev in listing:
         parsed = parse_mirror_id(ev.marker) if ev.marker else None
-        if parsed and parsed[0] == install_id:
+        if not parsed or parsed[0] != install_id:
+            continue
+        prev = ours.get(ev.marker)
+        if prev is None:
             ours[ev.marker] = ev
-    actions = []
+            continue
+        # Two copies of one mirror (a create whose response was lost): keep the mapped one.
+        row = mappings.get(ev.marker)
+        if row and row["target_event_id"] == ev.id:
+            ours[ev.marker], ev = ev, prev
+        dupes.append(ev)
+    actions = [Action("dedupe", ev.marker, ev.id, reason="duplicate copy") for ev in dupes]
     for mid, d in desired.items():
         ev, row = ours.get(mid), mappings.get(mid)
         if ev is None:
@@ -181,7 +190,7 @@ class Engine:
 
     def _sync_api(self, target, desired, listing, frozen, window, dry_run):
         actions = plan_target(desired, self.store.mappings(target), listing, self.install_id, frozen, window.start)
-        counts = {"create": 0, "update": 0, "delete": 0, "forget": 0, "errors": 0, "unchanged": 0}
+        counts = {"create": 0, "update": 0, "delete": 0, "dedupe": 0, "forget": 0, "errors": 0, "unchanged": 0}
         counts["unchanged"] = len(desired) - sum(1 for a in actions if a.op in ("create", "update"))
         conn = self.connectors[target]
         prefix = "DRY-RUN " if dry_run else ""
@@ -200,6 +209,8 @@ class Engine:
                 elif a.op == "delete":
                     conn.delete(a.target_event_id, a.mirror_id)
                     self.store.drop_mapping(target, a.mirror_id)
+                elif a.op == "dedupe":
+                    conn.delete(a.target_event_id, a.mirror_id)   # the mapping belongs to the kept copy
                 elif a.op == "forget":
                     self.store.drop_mapping(target, a.mirror_id)
                 counts[a.op] += 1
@@ -207,7 +218,8 @@ class Engine:
                 raise
             except MarkerMismatch as e:
                 counts["errors"] += 1
-                self.store.drop_mapping(target, a.mirror_id)
+                if a.op != "dedupe":   # a duplicate's mapping belongs to the kept copy
+                    self.store.drop_mapping(target, a.mirror_id)
                 self.say(f"[{target}] refused: {e}")
             except Exception as e:
                 counts["errors"] += 1

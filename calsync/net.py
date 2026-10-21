@@ -24,7 +24,13 @@ class AuthError(Exception):
 
 def request(method, url, *, headers=None, json_body=None, form=None, retries=5, timeout=60,
             sleep=time.sleep, opener=None):
-    """Return parsed JSON (or {} for empty bodies). Retries 429/5xx and network errors."""
+    """Return parsed JSON (or {} for empty bodies). Retries 429/5xx and network errors.
+
+    A JSON POST creates something, so after a timeout or 5xx it may already exist: it is
+    retried only on 429, which the server sends before doing any work. The engine removes
+    any duplicate a lost response still leaves behind.
+    """
+    unsafe = method == "POST" and json_body is not None
     data = None
     hdrs = dict(headers or {})
     if json_body is not None:
@@ -44,13 +50,13 @@ def request(method, url, *, headers=None, json_body=None, form=None, retries=5, 
         except urllib.error.HTTPError as e:
             body = e.read().decode("utf-8", "replace") if e.fp else ""
             e.close()
-            if e.code in RETRY_STATUSES and attempt < retries:
+            if e.code in RETRY_STATUSES and attempt < retries and (not unsafe or e.code == 429):
                 sleep(_delay(attempt, e.headers.get("Retry-After") if e.headers else None))
                 attempt += 1
                 continue
             raise HttpError(e.code, body, url) from None
         except (urllib.error.URLError, TimeoutError, ConnectionError) as e:
-            if attempt < retries:
+            if attempt < retries and not unsafe:
                 sleep(_delay(attempt, None))
                 attempt += 1
                 continue

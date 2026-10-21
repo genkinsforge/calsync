@@ -1,5 +1,6 @@
 import io
 import json
+import subprocess
 import tarfile
 import threading
 import unittest
@@ -39,18 +40,27 @@ class AdminAndInstallTests(unittest.TestCase):
             with e:
                 return e.code, e.headers.get("Content-Type"), e.read()
 
-    def test_install_and_bundle_need_a_key(self):
-        self.assertEqual(self.get("/agent/install")[0], 401)
+    def test_bundle_needs_a_key_and_the_installer_holds_none(self):
+        self.assertEqual(self.get("/agent/bundle.tar.gz")[0], 401)
         self.assertEqual(self.get("/agent/bundle.tar.gz", token="wrong")[0], 401)
+        code, _, body = self.get("/agent/install")
+        self.assertEqual(code, 200)
+        self.assertNotIn(self.agent, body.decode())
 
-    def test_install_script_embeds_public_url_and_the_callers_key(self):
-        code, ctype, body = self.get("/agent/install", self.agent,
-                                     {"Host": "calsync.jaredcluff.com", "X-Forwarded-Proto": "https"})
+    def test_install_script_uses_the_public_url_and_keeps_the_key_out_of_arguments(self):
+        code, ctype, body = self.get("/agent/install", headers={"Host": "calsync.jaredcluff.com",
+                                                               "X-Forwarded-Proto": "https"})
         self.assertEqual(code, 200)
         text = body.decode()
-        self.assertIn("HUB='https://calsync.jaredcluff.com'", text)
-        self.assertIn(f"TOKEN='{self.agent}'", text)
         self.assertTrue(text.startswith("#!/bin/sh"))
+        self.assertIn("HUB='https://calsync.jaredcluff.com'", text)
+        self.assertIn("read -r TOKEN </dev/tty", text)
+        self.assertIn('-K "$TMP/auth.curl"', text)
+        self.assertNotIn("Bearer $TOKEN", text.replace('header = "Authorization: Bearer %s', ""))
+        self.assertNotIn('"$TOKEN"\n', text)
+        # config is written before install.sh loads the launchd job
+        self.assertLess(text.index("setkey.js\" \"$CONF\""), text.index('sh "$TMP/calsync-agent/install.sh"'))
+        subprocess.run(["sh", "-n"], input=body, check=True)
 
     def test_bundle_contains_the_agent(self):
         code, ctype, body = self.get("/agent/bundle.tar.gz", self.agent)

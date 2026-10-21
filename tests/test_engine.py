@@ -140,6 +140,18 @@ class ChangeTests(EngineTestCase):
 
 
 class SafetyTests(EngineTestCase):
+    def test_duplicate_copies_of_a_mirror_are_removed_keeping_the_mapped_one(self):
+        self.p.add("p1", at(3), at(4), title="Dentist")
+        self.r.sync()
+        [kept] = self.g.mirrors()
+        # A create whose response was lost leaves a second copy with the same marker.
+        self.g.add("dup", kept.start, kept.end, title="Busy", marker=kept.marker)
+        self.r.sync()
+        self.assertEqual([e.id for e in self.g.mirrors()], [kept.id])
+        ops = len(self.g.ops)
+        self.r.sync()
+        self.assertEqual(len(self.g.ops), ops, "settles after one pass")
+
     def test_unmarked_events_on_targets_are_never_touched(self):
         for c in self.r.cals.values():
             c.add(f"{c.name}-own", at(1), at(2), title="mine", free=True)

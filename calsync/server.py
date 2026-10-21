@@ -3,6 +3,7 @@
   POST /agent/events            {"calendars": {"phdata": {"events": [...]}, "kiewit": {"error": "..."}}}
   GET  /agent/blocks?calendar=X  desired Busy blocks for X, each with its mirror id and hash
   GET  /healthz                  liveness, no auth
+  GET  /agent/install            installer script, no auth (holds no secret; asks for the key)
 """
 from __future__ import annotations
 
@@ -43,38 +44,58 @@ def agent_bundle() -> bytes:
     return buf.getvalue()
 
 
-def install_script(hub_url: str, token: str) -> str:
-    """A shell script that downloads the bundle with the same key, installs it and writes the hub
-    address and key into the agent's config. Served only to a caller who already holds the key."""
+def install_script(hub_url: str) -> str:
+    """A shell script that asks for the agent key, downloads the bundle with it, writes the hub
+    address and key into the agent's config and installs the agent. It holds no secret, so it is
+    served without a key. The key is read from the terminal and handed to curl and osascript
+    through files and stdin, never as an argument, so it stays out of process listings, endpoint
+    security logs and shell history."""
     q = lambda v: "'" + v.replace("'", "'\\''") + "'"
     return f"""#!/bin/sh
 # calsync agent installer, served by {hub_url}. Uses only what ships with macOS.
+#   curl -fsSL {hub_url}/agent/install | sh
 set -eu
 HUB={q(hub_url)}
-TOKEN={q(token)}
+CONF_DIR="$HOME/.config/calsync-agent"
+CONF="$CONF_DIR/config.json"
+umask 077
 TMP="$(mktemp -d)"
-trap 'rm -rf "$TMP"' EXIT
-/usr/bin/curl -fsS -H "Authorization: Bearer $TOKEN" "$HUB/agent/bundle.tar.gz" -o "$TMP/b.tgz"
+trap 'stty echo </dev/tty 2>/dev/null || true; rm -rf "$TMP"' EXIT INT TERM
+stty -echo </dev/tty
+printf 'calsync agent key (typing is hidden): ' >/dev/tty
+IFS= read -r TOKEN </dev/tty || TOKEN=""
+stty echo </dev/tty
+printf '\\n' >/dev/tty
+case "$TOKEN" in
+  ""|*[!A-Za-z0-9_-]*) echo "That is not a calsync key." >&2; exit 1 ;;
+esac
+printf 'header = "Authorization: Bearer %s"\\n' "$TOKEN" > "$TMP/auth.curl"
+/usr/bin/curl -fsS -K "$TMP/auth.curl" "$HUB/agent/bundle.tar.gz" -o "$TMP/b.tgz" \\
+  || {{ echo "The hub refused the download. Check the key." >&2; exit 1; }}
 /usr/bin/tar -xzf "$TMP/b.tgz" -C "$TMP"
-CONF="$HOME/.config/calsync-agent/config.json"
-FRESH=0; [ -e "$CONF" ] || FRESH=1
-sh "$TMP/calsync-agent/install.sh"
-if [ "$FRESH" = 1 ] || grep -q 'calsync.example.com' "$CONF"; then
-  /usr/bin/osascript -l JavaScript - "$CONF" "$HUB" "$TOKEN" <<'JS'
+# Config first, so the launchd job's first run already has the hub address and key.
+mkdir -p "$CONF_DIR"
+chmod 700 "$CONF_DIR"
+[ -e "$CONF" ] || cp "$TMP/calsync-agent/config.example.json" "$CONF"
+cat > "$TMP/setkey.js" <<'JS'
 function run(argv) {{
   ObjC.import('Foundation');
+  var data = $.NSFileHandle.fileHandleWithStandardInput.readDataToEndOfFile;
   var path = argv[0];
   var c = JSON.parse($.NSString.stringWithContentsOfFileEncodingError(path, $.NSUTF8StringEncoding, null).js);
-  c.hub_url = argv[1]; c.token = argv[2];
-  $(JSON.stringify(c, null, 2)).writeToFileAtomicallyEncodingError(path, true, $.NSUTF8StringEncoding, null);
+  c.hub_url = argv[1];
+  c.token = $.NSString.alloc.initWithDataEncoding(data, $.NSUTF8StringEncoding).js;
+  if (!$(JSON.stringify(c, null, 2)).writeToFileAtomicallyEncodingError(path, true, $.NSUTF8StringEncoding, null))
+    throw new Error('cannot write ' + path);
 }}
 JS
-  chmod 600 "$CONF"
-  echo "Set hub_url and token in $CONF."
-fi
+printf '%s' "$TOKEN" | /usr/bin/osascript -l JavaScript "$TMP/setkey.js" "$CONF" "$HUB"
+chmod 600 "$CONF"
+echo "Set hub_url and key in $CONF."
+sh "$TMP/calsync-agent/install.sh"
 echo
 echo "Now map your calendars. This also triggers the macOS Calendar permission prompt:"
-echo "  \"$HOME/Library/Application Support/calsync-agent/calsync-agent.sh\" --list-calendars"
+echo "  \\"$HOME/Library/Application Support/calsync-agent/calsync-agent.sh\\" --list-calendars"
 """
 
 
@@ -166,10 +187,7 @@ def make_server(cfg: Config, store: Store, host=None, port=None, tokens_file=Non
             if u.path == "/healthz":
                 return self._send(200, {"ok": True})
             if u.path == "/agent/install":
-                if not self._agent():
-                    return
-                token = self.headers["Authorization"][len("Bearer "):].strip()
-                return self._send_raw(200, install_script(self._hub_url(), token).encode(), "text/x-shellscript")
+                return self._send_raw(200, install_script(self._hub_url()).encode(), "text/x-shellscript")
             if u.path == "/agent/bundle.tar.gz":
                 if not self._agent():
                     return
@@ -224,9 +242,9 @@ def make_server(cfg: Config, store: Store, host=None, port=None, tokens_file=Non
                 if urllib.parse.parse_qs(u.query).get("dry_run"):
                     args.append("--dry-run")
                 # Detached: the request returns at once and the sync runs to completion on its own.
-                subprocess.Popen(args, cwd=str(REPO_DIR), stdin=subprocess.DEVNULL, start_new_session=True,
-                                 stdout=open(Path(cfg.path("state_db")).with_name("sync-on-demand.log"), "ab"),
-                                 stderr=subprocess.STDOUT)
+                with open(Path(cfg.path("state_db")).with_name("sync-on-demand.log"), "ab") as log:
+                    subprocess.Popen(args, cwd=str(REPO_DIR), stdin=subprocess.DEVNULL, start_new_session=True,
+                                     stdout=log, stderr=subprocess.STDOUT)
                 return self._send(202, {"ok": True, "started": " ".join(args[args.index("sync"):])})
             if u.path != "/agent/events":
                 return self._send(404, {"error": "not found"})

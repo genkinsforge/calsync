@@ -55,7 +55,8 @@ The window runs from 1 day ago to 60 days ahead (`window.days_back`, `window.day
 - **Stale agent.** If the work Mac has not pushed for `agent_stale_minutes` (default 30), the hub keeps using the last pushed set and marks the calendar STALE. It does not delete anything because the laptop is asleep.
 - **Aged-out copies stay.** When an event slides out of the back of the window, calsync forgets the mapping and leaves the old copy in place.
 - **Kill switch.** If `~/.config/calsync/DISABLED` exists, `calsync sync` does nothing and `GET /agent/blocks` returns 503. The agent has its own switch at `~/.config/calsync-agent/DISABLED` on the work Mac.
-- **Backoff.** HTTP 429 and 5xx responses and network errors retry with exponential backoff (honouring `Retry-After`), up to 5 times.
+- **Backoff.** HTTP 429 and 5xx responses and network errors retry with exponential backoff (honouring `Retry-After`), up to 5 times. Creating an event is the exception: after a timeout or 5xx the event may already exist, so a create retries only on 429 and is otherwise left to the next pass.
+- **Duplicates.** If two events on a target carry the same mirror id (a create whose response was lost), the engine deletes the extra copy and keeps the one in its state database.
 - **One sync at a time.** `calsync sync` takes a file lock next to the state database.
 
 ## Architecture
@@ -92,7 +93,7 @@ The agent, every 5 minutes:
 
 - `POST /agent/events` with body `{"calendars": {"phdata": {"events": [...]}, "kiewit": {"error": "calendar not found"}}}`. An `error` entry keeps the last good set and freezes that calendar.
 - `GET /agent/blocks?calendar=phdata` returns `{"calendar", "install_id", "generated_at", "window": {"start", "end"}, "blocks": [{"mirror_id", "title", "start", "end", "all_day", "hash"}], "frozen_sources": [...]}`. It returns 409 before the first sync and 503 while the kill switch is on.
-- `GET /agent/install` returns a shell script that downloads the agent from the hub with the caller's key, installs it, and writes the hub address and key into the agent's config. Run it on the work Mac with `curl -fsSL -H "Authorization: Bearer KEY" https://calsync.jaredcluff.com/agent/install | sh`.
+- `GET /agent/install` needs no key and holds no secret. It returns a shell script that asks for the key at the terminal, downloads the agent (`GET /agent/bundle.tar.gz`, key required), writes the hub address and key into the agent's config and installs it. Run it on the work Mac with `curl -fsSL https://calsync.jaredcluff.com/agent/install | sh`.
 - `GET /agent/bundle.tar.gz` returns the `agent/` files, built from the repo on each request.
 - `GET /status` (admin key) returns each calendar's last read and write result, mirror and block counts, and the agent's last push.
 - `POST /sync` (admin key) starts a sync on the hub and returns at once; `POST /sync?dry_run=1` plans without writing. Output goes to `sync-on-demand.log` beside the state database.
@@ -192,10 +193,10 @@ The plists set `LimitLoadToSessionType` to `Aqua` and `Background`. The studio o
 The agent needs nothing installed, and nothing needs copying: the hub serves it. On the work Mac, in Terminal:
 
 ```sh
-curl -fsSL -H "Authorization: Bearer WORKLAPTOP-KEY" https://calsync.jaredcluff.com/agent/install | sh
+curl -fsSL https://calsync.jaredcluff.com/agent/install | sh
 ```
 
-That downloads the agent from the hub, runs `install.sh`, and puts the hub address and key in the config. To install by hand instead, copy the `agent/` folder over and run `sh agent/install.sh`.
+It asks for the worklaptop key with typing hidden, downloads the agent from the hub with it, writes the hub address and key into the config, then runs `install.sh`. The key never appears in a command line, so it stays out of process listings, endpoint-security logs and shell history; for the same reason the installer hands it to `curl` in a 0600 file and to `osascript` on stdin. Running the installer again replaces the key, which is how a rotated key reaches the Mac. To install by hand instead, copy the `agent/` folder over and run `sh agent/install.sh`.
 
 `install.sh` copies the agent to `~/Library/Application Support/calsync-agent/`, writes `~/.config/calsync-agent/config.json` (mode 0600) from the example if it is missing, runs the self-test, writes `~/Library/LaunchAgents/com.genkinsforge.calsync-agent.plist` and loads it with `launchctl bootstrap gui/$(id -u)`. `uninstall.sh` reverses it and keeps the config.
 

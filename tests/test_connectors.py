@@ -149,6 +149,32 @@ class BackoffTests(unittest.TestCase):
             net.request("GET", "https://example.invalid/x", opener=opener, sleep=lambda s: None)
         self.assertEqual(cm.exception.status, 403)
 
+    def test_create_is_not_retried_after_a_lost_response(self):
+        # A timeout or 5xx on a create may mean the event exists; retrying would duplicate it.
+        for fail in (urllib.error.HTTPError("u", 503, "down", {}, io.BytesIO(b"{}")), TimeoutError("slow")):
+            calls = []
+
+            def opener(req, timeout):
+                calls.append(1)
+                raise fail
+            with self.assertRaises((net.HttpError, TimeoutError)):
+                net.request("POST", "https://example.invalid/x", json_body={"a": 1}, opener=opener,
+                            sleep=lambda s: None)
+            self.assertEqual(len(calls), 1)
+
+    def test_create_is_retried_on_429_and_token_posts_on_5xx(self):
+        for kwargs, code in (({"json_body": {"a": 1}}, 429), ({"form": {"a": "1"}}, 503)):
+            calls = []
+
+            def opener(req, timeout):
+                calls.append(1)
+                if len(calls) == 1:
+                    raise urllib.error.HTTPError(req.full_url, code, "x", {}, io.BytesIO(b"{}"))
+                return io.BytesIO(b'{"ok": true}')
+            self.assertEqual(net.request("POST", "https://example.invalid/x", opener=opener,
+                                         sleep=lambda s: None, **kwargs), {"ok": True})
+            self.assertEqual(len(calls), 2)
+
 
 if __name__ == "__main__":
     unittest.main()
